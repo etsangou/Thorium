@@ -19,3 +19,9 @@ message QuicEnvelope {
 
 	bytes encrypted_payload = 6;
 }
+
+message ServerAck {
+	string message_id = 1;
+	bool succes = 2;
+	string error_info = 3;
+}
