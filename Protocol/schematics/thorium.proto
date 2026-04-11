@@ -11,10 +11,11 @@ enum EventType {
 }
 
 message QuicEnvelope {
-	EventType type = 1;
-	uint64 timestamp = 2;
-	string sender_id = 3;
-	string destination_id = 4;
+	string message_id = 1;
+	EventType type = 2;
+	uint64 timestamp = 3;
+	string sender_id = 4;
+	string destination_id = 5;
 
-	bytes encrypted_payload = 5;
+	bytes encrypted_payload = 6;
 }
