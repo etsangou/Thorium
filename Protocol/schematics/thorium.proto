@@ -1,0 +1,11 @@
+syntax = "proto3";
+
+package thorium;
+
+enum EventType {
+	UNKNOWN = 0;
+	AUTH_REQUEST = 1;
+	TEXT_MESSAGE = 2;
+	FILE_TRANSFERT = 3;
+	READ_RECEIPT = 4;
+}
