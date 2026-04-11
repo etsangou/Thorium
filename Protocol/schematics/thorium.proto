@@ -25,3 +25,10 @@ message ServerAck {
 	bool succes = 2;
 	string error_info = 3;
 }
+
+message Packet {
+	oneof payload {
+		QuicEnvelope envelope = 1;
+		ServerAck ack = 2;
+	}
+}
