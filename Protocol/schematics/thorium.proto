@@ -9,3 +9,12 @@ enum EventType {
 	FILE_TRANSFERT = 3;
 	READ_RECEIPT = 4;
 }
+
+message QuicEnvolope {
+	EventType type = 1;
+	uint64 timestamp = 2;
+	string sender_id = 3;
+	string destination_id = 4;
+
+	bytes encrypted_payload = 5;
+}
