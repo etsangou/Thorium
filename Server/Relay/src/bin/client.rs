@@ -42,7 +42,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let envelope = thorium::QuicEnvelope {
         message_id: "test-1234-abcd".to_string(),
-        type_: thorium::EventType::EventTextMessage as i32,
+        r#type: thorium::EventType::EventTextMessage as i32,
         timestamp: 1680000000,
         sender_id: "sender_Terminal".to_string(),
         destination_id: "receiver_ID".to_string(),
