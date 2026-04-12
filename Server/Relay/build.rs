@@ -6,7 +6,7 @@ fn main() {
 	let includes = "../Protocol/schematics/";
 	prost_build::Config::new()
 		.compile_prostos(&[proto_file], &[includes])
-		.expect("Compilation error")
+		.expect("Compilation error");
 
 	println!("cargo:return-if-changed={}", proto_file);
 }
