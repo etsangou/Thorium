@@ -1,0 +1,11 @@
+[dependencies]
+
+quinn = "0.11"
+tokio = { version = "1", features = ["full"]}
+rustls = "0.21"
+rcgen = "0.11"
+prost = "0.12"
+
+[build-dependencies]
+
+prost-build = "0.12"
