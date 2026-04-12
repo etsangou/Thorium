@@ -63,13 +63,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
     if let Some(bytes_read) = recv_stream.read(&mut recv_buffer).await? {
         let response = thorium::Packet::decode(&recv_buffer[..bytes_read])?;
         
-        match response.payload {
+	match response.payload {
             Some(thorium::packet::Payload::Ack(ack)) => {
-                println!("server response: Success = {}, Msg = {}", ack.success, ack.error_message);
+                println!("server response: Success = {}, Msg = {}", ack.succes, ack.error_info); 
             }
             _ => println!("received only ACK"),
         }
-    }
+	}
 
     send_stream.finish().await?;
     connection.close(0u32.into(), b"End of test");
