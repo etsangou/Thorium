@@ -23,7 +23,6 @@ impl rustls::client::ServerCertVerifier for SkipServerVerification {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-
     let crypto = rustls::ClientConfig::builder()
         .with_safe_defaults()
         .with_custom_certificate_verifier(Arc::new(SkipServerVerification))
@@ -50,8 +49,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         encrypted_payload: b"TEST".to_vec(),
     };
 
-    let packet = thorium::ThoriumPacket {
-        payload: Some(thorium::thorium_packet::Payload::Envelope(envelope)),
+    let packet = thorium::Packet {
+        payload: Some(thorium::packet::Payload::Envelope(envelope)),
     };
 
     let mut buffer = Vec::new();
@@ -62,11 +61,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let mut recv_buffer = vec![0; 1024];
     if let Some(bytes_read) = recv_stream.read(&mut recv_buffer).await? {
-    
-        let response = thorium::ThoriumPacket::decode(&recv_buffer[..bytes_read])?;
+        let response = thorium::Packet::decode(&recv_buffer[..bytes_read])?;
         
         match response.payload {
-            Some(thorium::thorium_packet::Payload::Ack(ack)) => {
+            Some(thorium::packet::Payload::Ack(ack)) => {
                 println!("server response: Success = {}, Msg = {}", ack.success, ack.error_message);
             }
             _ => println!("received only ACK"),
