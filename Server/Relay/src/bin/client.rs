@@ -1,7 +1,7 @@
 use chacha20poly1305::{aead::{Aead, KeyInit, OsRng, AeadCore}, ChaCha20Poly1305, Key};
 use prost::Message;
-use quinn::{ClientConfig, Endpoint, Connection};
-use std::{error::Error, io::{self, Write}, sync::Arc};
+use quinn::{ClientConfig, Endpoint, TransportConfig};
+use std::{error::Error, io::{self, Write}, sync::Arc, time::Duration};
 
 pub mod thorium {
     include!(concat!(env!("OUT_DIR"), "/thorium.rs"));
@@ -16,9 +16,20 @@ impl rustls::client::ServerCertVerifier for SkipServerVerification {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let crypto = rustls::ClientConfig::builder().with_safe_defaults().with_custom_certificate_verifier(Arc::new(SkipServerVerification)).with_no_client_auth();
+    let crypto = rustls::ClientConfig::builder()
+        .with_safe_defaults()
+        .with_custom_certificate_verifier(Arc::new(SkipServerVerification))
+        .with_no_client_auth();
+
+    let mut transport_config = TransportConfig::default();
+    transport_config.max_idle_timeout(Some(Duration::from_secs(300).try_into().unwrap()));
+    transport_config.keep_alive_interval(Some(Duration::from_secs(5)));
+
+    let mut client_config = ClientConfig::new(Arc::new(crypto));
+    client_config.transport_config(Arc::new(transport_config));
+
     let mut endpoint = Endpoint::client("0.0.0.0:0".parse()?)?;
-    endpoint.set_default_client_config(ClientConfig::new(Arc::new(crypto)));
+    endpoint.set_default_client_config(client_config);
 
     let connection = endpoint.connect("127.0.0.1:4433".parse()?, "localhost")?.await?;
     println!("connected. enter your ID:");
@@ -26,10 +37,25 @@ async fn main() -> Result<(), Box<dyn Error>> {
     io::stdin().read_line(&mut my_id)?;
     let my_id = my_id.trim().to_string();
 
+    let (mut auth_send, _) = connection.open_bi().await?;
+    let auth_packet = thorium::Packet {
+        payload: Some(thorium::packet::Payload::Envelope(thorium::QuicEnvelope {
+            message_id: "auth".into(),
+            r#type: 0,
+            timestamp: 0,
+            sender_id: my_id.clone(),
+            destination_id: "server".into(),
+            encrypted_payload: vec![],
+        })),
+    };
+    let mut auth_buf = Vec::new();
+    auth_packet.encode(&mut auth_buf)?;
+    auth_send.write_all(&auth_buf).await?;
+    auth_send.finish().await?;
+
     let shared_key = Key::from_slice(b"thorium_super_secret_key_32bytes");
     let cipher = ChaCha20Poly1305::new(shared_key);
 
-    // BACKGROUND LISTENER
     let listen_conn = connection.clone();
     let listen_cipher = ChaCha20Poly1305::new(shared_key);
     tokio::spawn(async move {
@@ -38,11 +64,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
             if let Ok(Some(n)) = recv.read(&mut buf).await {
                 if let Ok(packet) = thorium::Packet::decode(&buf[..n]) {
                     if let Some(thorium::packet::Payload::Envelope(env)) = packet.payload {
-                        let nonce = chacha20poly1305::Nonce::from_slice(&env.encrypted_payload[..12]);
-                        let ciphertext = &env.encrypted_payload[12..];
-                        if let Ok(decrypted) = listen_cipher.decrypt(nonce, ciphertext) {
-                            println!("\n[FROM {}]: {}", env.sender_id, String::from_utf8_lossy(&decrypted));
-                            print!("> "); io::stdout().flush().unwrap();
+                        if env.encrypted_payload.len() > 12 {
+                            let nonce = chacha20poly1305::Nonce::from_slice(&env.encrypted_payload[..12]);
+                            let ciphertext = &env.encrypted_payload[12..];
+                            if let Ok(decrypted) = listen_cipher.decrypt(nonce, ciphertext) {
+                                println!("\n[FROM {}]: {}", env.sender_id, String::from_utf8_lossy(&decrypted));
+                                print!("> "); io::stdout().flush().unwrap();
+                            }
                         }
                     }
                 }
@@ -61,6 +89,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         io::stdin().read_line(&mut input)?;
         let text = input.trim();
         if text == "quit" { break; }
+        if text.is_empty() { continue; }
 
         let (mut send, mut recv_ack) = connection.open_bi().await?;
         let nonce = ChaCha20Poly1305::generate_nonce(&mut OsRng);
@@ -70,7 +99,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
         let packet = thorium::Packet {
             payload: Some(thorium::packet::Payload::Envelope(thorium::QuicEnvelope {
-                message_id: "1".into(),
+                message_id: "msg".into(),
                 r#type: 1,
                 timestamp: 0,
                 sender_id: my_id.clone(),
@@ -82,11 +111,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let mut buf = Vec::new();
         packet.encode(&mut buf)?;
         send.write_all(&buf).await?;
+        send.finish().await?;
 
         let mut ack_buf = vec![0; 1024];
         if let Ok(Some(n)) = recv_ack.read(&mut ack_buf).await {
-            let res = thorium::Packet::decode(&ack_buf[..n])?;
-            println!("status: {:?}", res.payload);
+            if let Ok(res) = thorium::Packet::decode(&ack_buf[..n]) {
+                if let Some(thorium::packet::Payload::Ack(ack)) = res.payload {
+                    println!("status: {}", ack.error_info);
+                }
+            }
         }
     }
     Ok(())

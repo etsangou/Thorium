@@ -1,6 +1,6 @@
 use prost::Message;
-use quinn::{Endpoint, ServerConfig, Connection};
-use std::{error::Error, net::SocketAddr, sync::Arc, collections::HashMap};
+use quinn::{Endpoint, ServerConfig, Connection, TransportConfig};
+use std::{error::Error, net::SocketAddr, sync::Arc, collections::HashMap, time::Duration};
 use tokio::sync::Mutex;
 
 pub mod thorium {
@@ -20,7 +20,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .with_no_client_auth()
         .with_single_cert(vec![cert_der], priv_key)?;
 
-    let server_config = ServerConfig::with_crypto(Arc::new(crypto));
+    let mut transport_config = TransportConfig::default();
+    transport_config.max_idle_timeout(Some(Duration::from_secs(300).try_into().unwrap()));
+
+    let mut server_config = ServerConfig::with_crypto(Arc::new(crypto));
+    server_config.transport_config(Arc::new(transport_config));
+
     let endpoint = Endpoint::server(server_config, addr)?;
     let clients: ClientMap = Arc::new(Mutex::new(HashMap::new()));
 
@@ -43,13 +48,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 if let Ok(packet) = thorium::Packet::decode(&buf[..n]) {
                                     if let Some(thorium::packet::Payload::Envelope(env)) = packet.payload {
                                         
-                                        // Register sender
                                         {
                                             let mut map = clients.lock().await;
                                             map.insert(env.sender_id.clone(), connection.clone());
                                         }
 
                                         let dest_id = env.destination_id.clone();
+                                        if dest_id == "server" {
+                                            println!("registered client: {}", env.sender_id);
+                                            return;
+                                        }
+
                                         println!("routing message to {}", dest_id);
 
                                         let mut routed = false;
@@ -66,6 +75,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                                 };
                                                 forward_packet.encode(&mut forward_buf).unwrap();
                                                 if t_send.write_all(&forward_buf).await.is_ok() {
+                                                    let _ = t_send.finish().await;
                                                     routed = true;
                                                 }
                                             }
