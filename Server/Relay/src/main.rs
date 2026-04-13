@@ -59,7 +59,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                             return;
                                         }
 
-                                        println!("routing message to {}", dest_id);
+                                        let garbage = String::from_utf8_lossy(&env.encrypted_payload);
+                                        println!("routing message to {} | payload: {}", dest_id, garbage);
 
                                         let mut routed = false;
                                         let target_conn = {
