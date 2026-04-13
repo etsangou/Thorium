@@ -1,9 +1,6 @@
-use chacha20poly1305::{
-    aead::{Aead, AeadCore, KeyInit, OsRng},
-    ChaCha20Poly1305, Key,
-};
+use chacha20poly1305::{aead::{Aead, KeyInit, OsRng, AeadCore}, ChaCha20Poly1305, Key};
 use prost::Message;
-use quinn::{ClientConfig, Endpoint};
+use quinn::{ClientConfig, Endpoint, Connection};
 use std::{error::Error, io::{self, Write}, sync::Arc};
 
 pub mod thorium {
@@ -12,96 +9,85 @@ pub mod thorium {
 
 struct SkipServerVerification;
 impl rustls::client::ServerCertVerifier for SkipServerVerification {
-    fn verify_server_cert(
-        &self,
-        _end_entity: &rustls::Certificate,
-        _intermediates: &[rustls::Certificate],
-        _server_name: &rustls::ServerName,
-        _scts: &mut dyn Iterator<Item = &[u8]>,
-        _ocsp_response: &[u8],
-        _now: std::time::SystemTime,
-    ) -> Result<rustls::client::ServerCertVerified, rustls::Error> {
+    fn verify_server_cert(&self, _e: &rustls::Certificate, _i: &[rustls::Certificate], _s: &rustls::ServerName, _sc: &mut dyn Iterator<Item = &[u8]>, _oc: &[u8], _n: std::time::SystemTime) -> Result<rustls::client::ServerCertVerified, rustls::Error> {
         Ok(rustls::client::ServerCertVerified::assertion())
     }
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let crypto = rustls::ClientConfig::builder()
-        .with_safe_defaults()
-        .with_custom_certificate_verifier(Arc::new(SkipServerVerification))
-        .with_no_client_auth();
-    let client_config = ClientConfig::new(Arc::new(crypto));
-
+    let crypto = rustls::ClientConfig::builder().with_safe_defaults().with_custom_certificate_verifier(Arc::new(SkipServerVerification)).with_no_client_auth();
     let mut endpoint = Endpoint::client("0.0.0.0:0".parse()?)?;
-    endpoint.set_default_client_config(client_config);
+    endpoint.set_default_client_config(ClientConfig::new(Arc::new(crypto)));
 
-    println!("trying to connect...");
-    let connection = endpoint
-        .connect("127.0.0.1:4433".parse()?, "localhost")?
-        .await?;
-    println!("connected. Type your message:");
+    let connection = endpoint.connect("127.0.0.1:4433".parse()?, "localhost")?.await?;
+    println!("connected. enter your ID:");
+    let mut my_id = String::new();
+    io::stdin().read_line(&mut my_id)?;
+    let my_id = my_id.trim().to_string();
 
-    // Simulated MLS Shared Secret Key (Must be exactly 32 bytes)
-    let shared_secret = b"thorium_super_secret_key_32bytes";
-    let key = Key::from_slice(shared_secret);
-    let cipher = ChaCha20Poly1305::new(key);
+    let shared_key = Key::from_slice(b"thorium_super_secret_key_32bytes");
+    let cipher = ChaCha20Poly1305::new(shared_key);
 
-    let mut message_counter = 1;
+    // BACKGROUND LISTENER
+    let listen_conn = connection.clone();
+    let listen_cipher = ChaCha20Poly1305::new(shared_key);
+    tokio::spawn(async move {
+        while let Ok((_, mut recv)) = listen_conn.accept_bi().await {
+            let mut buf = vec![0; 2048];
+            if let Ok(Some(n)) = recv.read(&mut buf).await {
+                if let Ok(packet) = thorium::Packet::decode(&buf[..n]) {
+                    if let Some(thorium::packet::Payload::Envelope(env)) = packet.payload {
+                        let nonce = chacha20poly1305::Nonce::from_slice(&env.encrypted_payload[..12]);
+                        let ciphertext = &env.encrypted_payload[12..];
+                        if let Ok(decrypted) = listen_cipher.decrypt(nonce, ciphertext) {
+                            println!("\n[FROM {}]: {}", env.sender_id, String::from_utf8_lossy(&decrypted));
+                            print!("> "); io::stdout().flush().unwrap();
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    println!("target ID to chat with:");
+    let mut target_id = String::new();
+    io::stdin().read_line(&mut target_id)?;
+    let target_id = target_id.trim().to_string();
 
     loop {
-        print!("> ");
-        io::stdout().flush()?;
-
+        print!("> "); io::stdout().flush()?;
         let mut input = String::new();
         io::stdin().read_line(&mut input)?;
         let text = input.trim();
-
         if text == "quit" { break; }
-        if text.is_empty() { continue; }
 
-        let (mut send_stream, mut recv_stream) = connection.open_bi().await?;
-
-        // Cryptography: Generate a random 12-byte Nonce
+        let (mut send, mut recv_ack) = connection.open_bi().await?;
         let nonce = ChaCha20Poly1305::generate_nonce(&mut OsRng);
-        
-        // Cryptography: Encrypt the text
-        let ciphertext = cipher.encrypt(&nonce, text.as_bytes())
-            .expect("encryption failure");
-
-        // Combine Nonce + Ciphertext for the payload
-        let mut encrypted_payload = nonce.to_vec();
-        encrypted_payload.extend_from_slice(&ciphertext);
-
-        let envelope = thorium::QuicEnvelope {
-            message_id: format!("msg-{}", message_counter),
-            r#type: thorium::EventType::EventTextMessage as i32,
-            timestamp: 1680000000,
-            sender_id: "Ozymen".to_string(),
-            destination_id: "Bob".to_string(),
-            encrypted_payload,
-        };
-        message_counter += 1;
+        let ciphertext = cipher.encrypt(&nonce, text.as_bytes()).unwrap();
+        let mut payload = nonce.to_vec();
+        payload.extend_from_slice(&ciphertext);
 
         let packet = thorium::Packet {
-            payload: Some(thorium::packet::Payload::Envelope(envelope)),
+            payload: Some(thorium::packet::Payload::Envelope(thorium::QuicEnvelope {
+                message_id: "1".into(),
+                r#type: 1,
+                timestamp: 0,
+                sender_id: my_id.clone(),
+                destination_id: target_id.clone(),
+                encrypted_payload: payload,
+            })),
         };
 
-        let mut buffer = Vec::new();
-        packet.encode(&mut buffer)?;
-        send_stream.write_all(&buffer).await?;
+        let mut buf = Vec::new();
+        packet.encode(&mut buf)?;
+        send.write_all(&buf).await?;
 
-        let mut recv_buffer = vec![0; 1024];
-        if let Some(bytes_read) = recv_stream.read(&mut recv_buffer).await? {
-            let response = thorium::Packet::decode(&recv_buffer[..bytes_read])?;
-            if let Some(thorium::packet::Payload::Ack(ack)) = response.payload {
-                println!("server response: Success = {}", ack.succes);
-            }
+        let mut ack_buf = vec![0; 1024];
+        if let Ok(Some(n)) = recv_ack.read(&mut ack_buf).await {
+            let res = thorium::Packet::decode(&ack_buf[..n])?;
+            println!("status: {:?}", res.payload);
         }
-
-        send_stream.finish().await?;
     }
-
-    connection.close(0u32.into(), b"End of test");
     Ok(())
 }
