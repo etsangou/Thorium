@@ -52,6 +52,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                     let mut resp_buf = Vec::new();
                                     response_packet.encode(&mut resp_buf).unwrap();
                                     let _ = send_stream.write_all(&resp_buf).await;
+                                    let _ = send_stream.finish().await;
                                 }
                             }
                         }
