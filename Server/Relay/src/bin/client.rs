@@ -78,48 +78,87 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
     });
 
-    println!("target ID to chat with:");
-    let mut target_id = String::new();
-    io::stdin().read_line(&mut target_id)?;
-    let target_id = target_id.trim().to_string();
-
     loop {
+        println!("\n--- THORIUM MENU ---");
+        println!("1. Refresh client list");
+        println!("2. Start chat with client");
+        println!("3. Quit");
         print!("> "); io::stdout().flush()?;
-        let mut input = String::new();
-        io::stdin().read_line(&mut input)?;
-        let text = input.trim();
-        if text == "quit" { break; }
-        if text.is_empty() { continue; }
 
-        let (mut send, mut recv_ack) = connection.open_bi().await?;
-        let nonce = ChaCha20Poly1305::generate_nonce(&mut OsRng);
-        let ciphertext = cipher.encrypt(&nonce, text.as_bytes()).unwrap();
-        let mut payload = nonce.to_vec();
-        payload.extend_from_slice(&ciphertext);
+        let mut choice = String::new();
+        io::stdin().read_line(&mut choice)?;
 
-        let packet = thorium::Packet {
-            payload: Some(thorium::packet::Payload::Envelope(thorium::QuicEnvelope {
-                message_id: "msg".into(),
-                r#type: 1,
-                timestamp: 0,
-                sender_id: my_id.clone(),
-                destination_id: target_id.clone(),
-                encrypted_payload: payload,
-            })),
-        };
+        match choice.trim() {
+            "1" => {
+                let (mut send, mut recv) = connection.open_bi().await?;
+                let packet = thorium::Packet {
+                    payload: Some(thorium::packet::Payload::ListRequest(thorium::ClientListRequest {})),
+                };
+                let mut buf = Vec::new();
+                packet.encode(&mut buf)?;
+                send.write_all(&buf).await?;
+                send.finish().await?;
 
-        let mut buf = Vec::new();
-        packet.encode(&mut buf)?;
-        send.write_all(&buf).await?;
-        send.finish().await?;
-
-        let mut ack_buf = vec![0; 1024];
-        if let Ok(Some(n)) = recv_ack.read(&mut ack_buf).await {
-            if let Ok(res) = thorium::Packet::decode(&ack_buf[..n]) {
-                if let Some(thorium::packet::Payload::Ack(ack)) = res.payload {
-                    println!("status: {}", ack.error_info);
+                let mut resp_buf = vec![0; 2048];
+                if let Ok(Some(n)) = recv.read(&mut resp_buf).await {
+                    if let Ok(res) = thorium::Packet::decode(&resp_buf[..n]) {
+                        if let Some(thorium::packet::Payload::ListResponse(list)) = res.payload {
+                            println!("Online clients: {:?}", list.client_ids);
+                        }
+                    }
                 }
             }
+            "2" => {
+                println!("target ID:");
+                let mut target_id = String::new();
+                io::stdin().read_line(&mut target_id)?;
+                let target_id = target_id.trim().to_string();
+
+                println!("chatting with {}. type 'quit' to return to menu.", target_id);
+                loop {
+                    print!("chat > "); io::stdout().flush()?;
+                    let mut input = String::new();
+                    io::stdin().read_line(&mut input)?;
+                    let text = input.trim();
+                    if text == "quit" { break; }
+                    if text.is_empty() { continue; }
+
+                    let (mut send, mut recv_ack) = connection.open_bi().await?;
+                    let nonce = ChaCha20Poly1305::generate_nonce(&mut OsRng);
+                    let ciphertext = cipher.encrypt(&nonce, text.as_bytes()).unwrap();
+                    let mut payload = nonce.to_vec();
+                    payload.extend_from_slice(&ciphertext);
+
+                    let packet = thorium::Packet {
+                        payload: Some(thorium::packet::Payload::Envelope(thorium::QuicEnvelope {
+                            message_id: "msg".into(),
+                            r#type: 1,
+                            timestamp: 0,
+                            sender_id: my_id.clone(),
+                            destination_id: target_id.clone(),
+                            encrypted_payload: payload,
+                        })),
+                    };
+
+                    let mut buf = Vec::new();
+                    packet.encode(&mut buf)?;
+                    send.write_all(&buf).await?;
+                    send.finish().await?;
+
+                    let mut ack_buf = vec![0; 1024];
+                    if let Ok(Some(n)) = recv_ack.read(&mut ack_buf).await {
+                        if let Ok(res) = thorium::Packet::decode(&ack_buf[..n]) {
+                            if let Some(thorium::packet::Payload::Ack(ack)) = res.payload {
+                                if !ack.succes {
+                                    println!("status: {}", ack.error_info);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            "3" => break,
+            _ => println!("invalid choice"),
         }
     }
     Ok(())

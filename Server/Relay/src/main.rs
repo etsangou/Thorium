@@ -46,51 +46,69 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             let mut buf = vec![0; 2048];
                             if let Ok(Some(n)) = recv_stream.read(&mut buf).await {
                                 if let Ok(packet) = thorium::Packet::decode(&buf[..n]) {
-                                    if let Some(thorium::packet::Payload::Envelope(env)) = packet.payload {
-                                        
-                                        {
-                                            let mut map = clients.lock().await;
-                                            map.insert(env.sender_id.clone(), connection.clone());
-                                        }
-
-                                        let dest_id = env.destination_id.clone();
-                                        if dest_id == "server" {
-                                            println!("registered client: {}", env.sender_id);
-                                            return;
-                                        }
-
-                                        let garbage = String::from_utf8_lossy(&env.encrypted_payload);
-                                        println!("routing message to {} | payload: {}", dest_id, garbage);
-
-                                        let mut routed = false;
-                                        let target_conn = {
-                                            let map = clients.lock().await;
-                                            map.get(&dest_id).cloned()
-                                        };
-
-                                        if let Some(conn) = target_conn {
-                                            if let Ok((mut t_send, _)) = conn.open_bi().await {
-                                                let mut forward_buf = Vec::new();
-                                                let forward_packet = thorium::Packet {
-                                                    payload: Some(thorium::packet::Payload::Envelope(env.clone())),
+                                    if let Some(payload) = packet.payload {
+                                        match payload {
+                                            thorium::packet::Payload::ListRequest(_) => {
+                                                let map = clients.lock().await;
+                                                let ids: Vec<String> = map.keys().cloned().collect();
+                                                
+                                                let response = thorium::Packet {
+                                                    payload: Some(thorium::packet::Payload::ListResponse(thorium::ClientListResponse {
+                                                        client_ids: ids,
+                                                    })),
                                                 };
-                                                forward_packet.encode(&mut forward_buf).unwrap();
-                                                if t_send.write_all(&forward_buf).await.is_ok() {
-                                                    let _ = t_send.finish().await;
-                                                    routed = true;
-                                                }
+                                                let mut resp_buf = Vec::new();
+                                                response.encode(&mut resp_buf).unwrap();
+                                                let _ = send_stream.write_all(&resp_buf).await;
+                                                let _ = send_stream.finish().await;
                                             }
-                                        }
+                                            thorium::packet::Payload::Envelope(env) => {
+                                                {
+                                                    let mut map = clients.lock().await;
+                                                    map.insert(env.sender_id.clone(), connection.clone());
+                                                }
 
-                                        let ack = thorium::ServerAck {
-                                            message_id: env.message_id,
-                                            succes: routed,
-                                            error_info: if routed { "delivered".into() } else { "offline".into() },
-                                        };
-                                        let mut resp_buf = Vec::new();
-                                        thorium::Packet { payload: Some(thorium::packet::Payload::Ack(ack)) }.encode(&mut resp_buf).unwrap();
-                                        let _ = send_stream.write_all(&resp_buf).await;
-                                        let _ = send_stream.finish().await;
+                                                let dest_id = env.destination_id.clone();
+                                                if dest_id == "server" {
+                                                    println!("registered client: {}", env.sender_id);
+                                                    return;
+                                                }
+
+                                                let garbage = String::from_utf8_lossy(&env.encrypted_payload);
+                                                println!("routing message to {} | payload: {}", dest_id, garbage);
+
+                                                let mut routed = false;
+                                                let target_conn = {
+                                                    let map = clients.lock().await;
+                                                    map.get(&dest_id).cloned()
+                                                };
+
+                                                if let Some(conn) = target_conn {
+                                                    if let Ok((mut t_send, _)) = conn.open_bi().await {
+                                                        let mut forward_buf = Vec::new();
+                                                        let forward_packet = thorium::Packet {
+                                                            payload: Some(thorium::packet::Payload::Envelope(env.clone())),
+                                                        };
+                                                        forward_packet.encode(&mut forward_buf).unwrap();
+                                                        if t_send.write_all(&forward_buf).await.is_ok() {
+                                                            let _ = t_send.finish().await;
+                                                            routed = true;
+                                                        }
+                                                    }
+                                                }
+
+                                                let ack = thorium::ServerAck {
+                                                    message_id: env.message_id,
+                                                    succes: routed,
+                                                    error_info: if routed { "delivered".into() } else { "offline".into() },
+                                                };
+                                                let mut resp_buf = Vec::new();
+                                                thorium::Packet { payload: Some(thorium::packet::Payload::Ack(ack)) }.encode(&mut resp_buf).unwrap();
+                                                let _ = send_stream.write_all(&resp_buf).await;
+                                                let _ = send_stream.finish().await;
+                                            }
+                                            _ => {}
+                                        }
                                     }
                                 }
                             }
