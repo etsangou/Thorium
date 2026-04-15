@@ -26,9 +26,17 @@ message ServerAck {
 	string error_info = 3;
 }
 
+message ClientListRequest {}
+
+message ClientListResponse {
+    repeated string client_ids = 1;
+}
+
 message Packet {
-	oneof payload {
-		QuicEnvelope envelope = 1;
-		ServerAck ack = 2;
-	}
+    oneof payload {
+        QuicEnvelope envelope = 1;
+        ServerAck ack = 2;
+        ClientListRequest list_request = 3;
+        ClientListResponse list_response = 4;
+    }
 }
