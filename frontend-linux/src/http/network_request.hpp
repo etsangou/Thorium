@@ -6,7 +6,11 @@
 
 class network_request {
 public:
-    static int get(std::string url)
+    int get(std::string url);
     network_request(/* args */);
     ~network_request();
+    std::string get_web_answer();
+
+private:
+    std::string _response;
 };

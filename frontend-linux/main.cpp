@@ -1,13 +1,13 @@
 #include "app/app.hpp"
 
 int main() {
-    // Création de la fenêtre
-    if (!glfwInit()) return 1;
-    GLFWwindow* window = glfwCreateWindow(1280, 720, "Thorium", NULL, NULL);
-    glfwMakeContextCurrent(window);
+    app::application_specification app_spec;
+    app_spec.name = "Thorium";
+    app_spec.windows_spec.width = 1280;
+    app_spec.windows_spec.height = 720;
 
     // Démarrage de l'application (UI)
-    app myApp(window);
+    app myApp(app_spec);
     myApp.start();
 
     return 0;

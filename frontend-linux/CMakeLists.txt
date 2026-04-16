@@ -21,11 +21,12 @@ set(IMGUI_SRCS
 add_executable(Thorium
     main.cpp
     app/app.cpp
+    src/http/network_request.cpp
     ${IMGUI_SRCS}
 )
 
 # Tell the compiler where the headers are
-target_include_directories(Thorium PRIVATE src/imgui src/imgui/backends)
+target_include_directories(Thorium PRIVATE src/imgui src/imgui/backends src/http)
 
 # Link the graphics engine
 target_link_libraries(Thorium PRIVATE 

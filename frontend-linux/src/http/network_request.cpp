@@ -1,15 +1,16 @@
 // g++ -o my_app main.cpp -lpthread
 #include "network_request.hpp"
 
-network_request() = default;
-~network_request() = default;
+network_request::network_request() = default;
+network_request::~network_request() = default;
 
-static int get(std::string url) {
+int network_request::get(std::string url) {
     httplib::Client cli(url);
     
-    if (auto res = cli.Get("/")) {
+    if (auto res = cli.Get("/enzo")) {
         if (res->status == 200) {
-            std::cout << "Response: " << res->body << std::endl;
+            _response = res->body;
+            //std::cout << "Response: " << _response << std::endl;
             return 0;
         }
         return 1;
@@ -18,4 +19,8 @@ static int get(std::string url) {
         std::cerr << "HTTP Error: " << httplib::to_string(err) << std::endl;
         return 1;
     }
+}
+
+std::string network_request::get_web_answer() {
+    return _response;
 }
