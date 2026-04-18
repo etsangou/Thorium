@@ -46,6 +46,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             sender_id: my_id.clone(),
             destination_id: "server".into(),
             encrypted_payload: vec![],
+            channel_id: "".into(),
         })),
     };
     let mut auth_buf = Vec::new();
@@ -68,7 +69,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             let nonce = chacha20poly1305::Nonce::from_slice(&env.encrypted_payload[..12]);
                             let ciphertext = &env.encrypted_payload[12..];
                             if let Ok(decrypted) = listen_cipher.decrypt(nonce, ciphertext) {
-                                println!("\n[FROM {}]: {}", env.sender_id, String::from_utf8_lossy(&decrypted));
+                                let prefix = if env.channel_id.is_empty() {
+                                    format!("[FROM {}]", env.sender_id)
+                                } else {
+                                    format!("[{} - {}]", env.sender_id, env.channel_id)
+                                };
+                                println!("\n{}: {}", prefix, String::from_utf8_lossy(&decrypted));
                                 print!("> "); io::stdout().flush().unwrap();
                             }
                         }
@@ -81,8 +87,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     loop {
         println!("\n--- THORIUM MENU ---");
         println!("1. Refresh client list");
-        println!("2. Start chat with client");
-        println!("3. Quit");
+        println!("2. Start direct chat");
+        println!("3. Join space salon");
+        println!("4. Quit");
         print!("> "); io::stdout().flush()?;
 
         let mut choice = String::new();
@@ -114,52 +121,74 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 io::stdin().read_line(&mut target_id)?;
                 let target_id = target_id.trim().to_string();
 
-                println!("chatting with {}. type 'quit' to return to menu.", target_id);
-                loop {
-                    print!("chat > "); io::stdout().flush()?;
-                    let mut input = String::new();
-                    io::stdin().read_line(&mut input)?;
-                    let text = input.trim();
-                    if text == "quit" { break; }
-                    if text.is_empty() { continue; }
-
-                    let (mut send, mut recv_ack) = connection.open_bi().await?;
-                    let nonce = ChaCha20Poly1305::generate_nonce(&mut OsRng);
-                    let ciphertext = cipher.encrypt(&nonce, text.as_bytes()).unwrap();
-                    let mut payload = nonce.to_vec();
-                    payload.extend_from_slice(&ciphertext);
-
-                    let packet = thorium::Packet {
-                        payload: Some(thorium::packet::Payload::Envelope(thorium::QuicEnvelope {
-                            message_id: "msg".into(),
-                            r#type: 1,
-                            timestamp: 0,
-                            sender_id: my_id.clone(),
-                            destination_id: target_id.clone(),
-                            encrypted_payload: payload,
-                        })),
-                    };
-
-                    let mut buf = Vec::new();
-                    packet.encode(&mut buf)?;
-                    send.write_all(&buf).await?;
-                    send.finish().await?;
-
-                    let mut ack_buf = vec![0; 1024];
-                    if let Ok(Some(n)) = recv_ack.read(&mut ack_buf).await {
-                        if let Ok(res) = thorium::Packet::decode(&ack_buf[..n]) {
-                            if let Some(thorium::packet::Payload::Ack(ack)) = res.payload {
-                                if !ack.succes {
-                                    println!("status: {}", ack.error_info);
-                                }
-                            }
-                        }
-                    }
-                }
+                println!("chatting directly with {}. type 'quit' to return.", target_id);
+                chat_loop(&connection, &cipher, &my_id, target_id, "".to_string(), false).await?;
             }
-            "3" => break,
+            "3" => {
+                println!("space ID:");
+                let mut space_id = String::new();
+                io::stdin().read_line(&mut space_id)?;
+                let space_id = space_id.trim().to_string();
+
+                println!("salon name:");
+                let mut salon_id = String::new();
+                io::stdin().read_line(&mut salon_id)?;
+                let salon_id = salon_id.trim().to_string();
+
+                println!("broadcasting to {} in {}. type 'quit' to return.", salon_id, space_id);
+                chat_loop(&connection, &cipher, &my_id, space_id, salon_id, true).await?;
+            }
+            "4" => break,
             _ => println!("invalid choice"),
         }
+    }
+    Ok(())
+}
+
+async fn chat_loop(
+    connection: &quinn::Connection,
+    cipher: &ChaCha20Poly1305,
+    my_id: &str,
+    target_id: String,
+    channel_id: String,
+    is_group: bool,
+) -> Result<(), Box<dyn Error>> {
+    loop {
+        print!("chat > "); io::stdout().flush()?;
+        let mut input = String::new();
+        io::stdin().read_line(&mut input)?;
+        let text = input.trim();
+        if text == "quit" { break; }
+        if text.is_empty() { continue; }
+
+        let formatted_text = if is_group {
+            format!("{}: {}", my_id, text)
+        } else {
+            text.to_string()
+        };
+
+        let (mut send, _) = connection.open_bi().await?;
+        let nonce = ChaCha20Poly1305::generate_nonce(&mut OsRng);
+        let ciphertext = cipher.encrypt(&nonce, formatted_text.as_bytes()).unwrap();
+        let mut payload = nonce.to_vec();
+        payload.extend_from_slice(&ciphertext);
+
+        let packet = thorium::Packet {
+            payload: Some(thorium::packet::Payload::Envelope(thorium::QuicEnvelope {
+                message_id: "msg".into(),
+                r#type: 1,
+                timestamp: 0,
+                sender_id: my_id.to_string(),
+                destination_id: target_id.clone(),
+                encrypted_payload: payload,
+                channel_id: channel_id.clone(),
+            })),
+        };
+
+        let mut buf = Vec::new();
+        packet.encode(&mut buf)?;
+        send.write_all(&buf).await?;
+        send.finish().await?;
     }
     Ok(())
 }

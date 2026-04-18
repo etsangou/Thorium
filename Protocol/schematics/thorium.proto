@@ -16,8 +16,8 @@ message QuicEnvelope {
 	uint64 timestamp = 3;
 	string sender_id = 4;
 	string destination_id = 5;
-
 	bytes encrypted_payload = 6;
+	string channel_id = 7;
 }
 
 message ServerAck {
