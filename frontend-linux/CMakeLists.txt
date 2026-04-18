@@ -34,8 +34,3 @@ target_link_libraries(Thorium PRIVATE
     GLEW::GLEW
     OpenGL::GL
 )
-
-# Compilation :
-# cmake -B build -S .
-# cmake --build build
-# ./build/Thorium 
