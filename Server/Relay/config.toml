@@ -1,0 +1,7 @@
+[server]
+ip = "0.0.0.0"
+port = 4433
+cert_hostname = "localhost"
+
+[network]
+idle_timeout_secs = 300
