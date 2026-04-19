@@ -28,7 +28,7 @@ message ServerAck {
 
 message PeerInfo {
 	string target_id = 1;
-	string ip_addresse = 2;
+	string ip_address = 2;
 }
 
 message Packet {
