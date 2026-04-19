@@ -26,9 +26,16 @@ message ServerAck {
 	string error_info = 3;
 }
 
+message PeerInfo {
+	string target_id = 1;
+	string ip_addresse = 2;
+}
+
 message Packet {
 	oneof payload {
 		QuicEnvelope envelope = 1;
 		ServerAck ack = 2;
+		PeerInfo peer_request = 3;
+		PeerInfo peer_response = 4;
 	}
 }
