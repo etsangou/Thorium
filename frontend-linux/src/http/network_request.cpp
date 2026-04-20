@@ -7,7 +7,7 @@ network_request::~network_request() = default;
 int network_request::get(std::string url) {
     httplib::Client cli(url);
     
-    if (auto res = cli.Get("/enzo")) {
+    if (auto res = cli.Get("/get_user_detail")) {
         if (res->status == 200) {
             _response = res->body;
             //std::cout << "Response: " << _response << std::endl;
