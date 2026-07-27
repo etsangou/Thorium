@@ -7,3 +7,5 @@ Thorium is a Discord like app and protocol that is open-source and that you can 
 ## How to install a different client
 
 ## How to create a client
+
+[unnamed.png]
